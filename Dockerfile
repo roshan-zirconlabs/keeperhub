@@ -303,45 +303,6 @@ ENV NODE_ENV=production
 # Build with: docker build --target executor -t keeperhub-executor .
 CMD ["tsx", "keeperhub-executor/index.ts"]
 
-# Stage 3: Runner (main Next.js app)
-FROM node:24-alpine AS runner
-WORKDIR /app
-
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-
-COPY --link --from=deps /etc/ssl/certs/rds-combined-ca-bundle.pem /etc/ssl/certs/rds-combined-ca-bundle.pem
-
-# Create non-root user and install curl + openssl (used by healthcheck and cronjob scripts)
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs && \
-    apk add --no-cache curl openssl
-
-# Copy built application (source maps removed - uploaded by sentry-upload stage)
-COPY --link --from=builder /app/public ./public
-COPY --link --from=builder --chown=1001:1001 /app/.next/standalone ./
-COPY --link --from=builder --chown=1001:1001 /app/.next/static ./.next/static
-RUN find .next -name '*.map' -delete 2>/dev/null || true
-
-# Copy OG image fonts for server-side image generation
-COPY --link --from=source --chown=1001:1001 /app/app/api/og/fonts ./app/api/og/fonts
-
-# Copy deploy scripts (used by cronjobs)
-COPY --link --from=source /app/deploy/scripts ./deploy/scripts
-
-# Switch to non-root user
-USER nextjs
-
-# Expose port
-EXPOSE 3000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3000/ || exit 1
-
-# Start the application
-CMD ["node", "server.js"]
-
 # ==============================================================================
 # Stage: metrics-collector (TECH-6484)
 # Single-replica service that serves the DB-sourced Prometheus gauges (the
@@ -374,3 +335,24 @@ EXPOSE 9090
 
 # Build with: docker build --target metrics-collector -t keeperhub-metrics-collector .
 CMD ["tsx", "keeperhub-metrics-collector/index.ts"]
+
+# Stage 3: Runner (main Next.js app)
+FROM builder AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --link --from=deps /etc/ssl/certs/rds-combined-ca-bundle.pem /etc/ssl/certs/rds-combined-ca-bundle.pem
+
+RUN apk add --no-cache curl openssl
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/ || exit 1
+
+# Start the application
+CMD ["sh", "-c", "pnpm build && pnpm start"]
