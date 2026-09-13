@@ -131,6 +131,10 @@ ENV SANDBOX_URL=http://keeperhub-sandbox-common.keeperhub.svc.cluster.local:8787
 # concurrent builders to prevent racing on Next.js cache writes when bake runs
 # multiple targets that share this stage. The stable mount id lets CI persist
 # this cache across ephemeral runners (see build-images.yml).
+# Cap build workers and memory to prevent Render/CI 8GB OOM
+ENV NEXT_CPU_COUNT=1
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN --mount=type=cache,id=nextjs-build-cache,target=/app/.next/cache,sharing=locked pnpm build
 
 # Stage 2.5b: Sentry source map upload (side-effect only, not consumed by other stages)
@@ -355,4 +359,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:3000/ || exit 1
 
 # Start the application
-CMD ["sh", "-c", "pnpm build && pnpm start"]
+CMD ["pnpm", "start"]
